@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific
+data/raw/
+data/held_out_set.parquet
+data/*.parquet.bak
+data/run1_responses.parquet
+data/run2_decoys.parquet
+mcbench_results_demo_executed.ipynb
