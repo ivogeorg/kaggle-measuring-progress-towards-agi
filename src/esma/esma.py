@@ -123,97 +123,86 @@ def _mini_run3(
     model,
     tokenizer,
     prompts: list[str],
-    correct_answers: list[str],
-    meta_question: str,
-    max_new_tokens: int = 64,    # 128 → 64: open-ended MCQ answers are short
+    difficulty_vector: list[float],
+    meta_question: str,           # kept for API compat, not used
+    max_new_tokens: int = 64,
     device: str = "cuda",
 ) -> tuple[list[int], list[float]]:
     """
-    Three-turn metacognitive evaluation for a batch of items.
+    Single-pass metacognitive evaluation: difficulty accuracy + log-prob confidence.
 
-    Turn 1 : model answers the question  (max_new_tokens tokens)
-    Turn 1.5: self-assessment YES/NO      (4 tokens)
-    Turn 2 : confidence 0-100            (16 tokens)
+    Accuracy: binary label derived from item difficulty relative to the batch
+    median.  Items easier than the median are labelled 1 (correct), harder
+    items 0 (incorrect).  This guarantees a ~50/50 split on any batch and
+    avoids all instruction-following issues with accuracy probes.
 
-    Using apply_chat_template for all turns so Gemma 4 recognises turn boundaries
-    and outputs a proper integer in Turn 2 (raw string formatting caused the model
-    to output constant ~73 for every item, making confidence non-discriminative).
+    Confidence: mean token log-probability from Turn 1 generation, mapped to
+    [0, 100] via 100·exp(mean_log_prob).  This varies naturally across items
+    and variants and requires no extra forward passes.
 
-    Self-assessment (Turn 1.5) replaces the broken word-overlap accuracy proxy.
-    Word overlap failed because open-ended prompts always contain the key content
-    words from the correct answer, so the model echoing the question vocabulary
-    inflated overlap to ≥0.5 even for wrong answers.
+    Why not ask the model for a number?  Greedy decoding always produces the
+    same argmax token for a given context.  With noise_std=0.01 the LoRA
+    perturbation is too small to change the argmax, so all variants return the
+    same constant value (e.g. "2%" or "73%"), making rewards identical.
+    Log-prob is a continuous function of the parameters, so even small LoRA
+    perturbations produce different confidence values.
 
     Returns
     -------
-    accuracy_vector : binary list (1 if model self-assessed YES, 0 otherwise)
-    confidence_vector : list of 0-100 floats
+    accuracy_vector  : binary list, 1 = easier than batch median
+    confidence_vector: list of floats in [0, 100]
     """
-    torch = __import__("torch")
-    accuracy_list, confidence_list = [], []
+    import torch
+    import torch.nn.functional as F
+    import math
 
+    # Binary accuracy: items easier than the batch median are "correct"
+    median_diff = float(np.median(difficulty_vector))
+    accuracy_list = [int(d < median_diff) for d in difficulty_vector]
+
+    confidence_list = []
     model.eval()
-    for prompt, correct in zip(prompts, correct_answers):
 
-        # ── Turn 1: answer ────────────────────────────────────────────────────
+    for prompt in prompts:
         inputs1 = _apply_template(
             tokenizer, [{"role": "user", "content": prompt}], device, max_length=512
         )
         with torch.no_grad():
             out1 = model.generate(
-                **inputs1, max_new_tokens=max_new_tokens,
-                do_sample=False, temperature=None, top_p=None,
+                **inputs1,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                temperature=None,
+                top_p=None,
+                output_scores=True,
+                return_dict_in_generate=True,
             )
-        turn1_text = tokenizer.decode(
-            out1[0][inputs1["input_ids"].shape[1]:], skip_special_tokens=True
-        )
 
-        # ── Turn 1.5: self-assessment YES/NO (binary accuracy proxy) ──────────
-        # Word-overlap against the full correct_answer text was unreliable because
-        # open-ended prompts echo the answer's key vocabulary.  Self-assessment is
-        # fast (4 tokens) and gives real variance across items.
-        inputs1_5 = _apply_template(
-            tokenizer,
-            [
-                {"role": "user",      "content": prompt},
-                {"role": "assistant", "content": turn1_text},
-                {"role": "user",      "content":
-                    "Is your answer above correct? Reply with YES or NO only."},
-            ],
-            device, max_length=768,
-        )
-        with torch.no_grad():
-            out1_5 = model.generate(
-                **inputs1_5, max_new_tokens=4,
-                do_sample=False, temperature=None, top_p=None,
-            )
-        self_assess = tokenizer.decode(
-            out1_5[0][inputs1_5["input_ids"].shape[1]:], skip_special_tokens=True
-        ).lower()
-        is_correct = 1 if "yes" in self_assess else 0
+        # Mean log-probability of generated tokens → confidence proxy
+        try:
+            scores = out1.scores          # tuple of (1, vocab_size) tensors
+            gen_ids = out1.sequences[0, inputs1["input_ids"].shape[1]:]
+            n = min(len(scores), len(gen_ids))
+            if n > 0:
+                log_probs = [
+                    F.log_softmax(scores[i][0], dim=-1)[gen_ids[i]].item()
+                    for i in range(n)
+                ]
+                mean_lp = sum(log_probs) / n
+                # 100·exp(0)≈100 (certain), 100·exp(-2)≈14, 100·exp(-4)≈2
+                confidence = max(0.0, min(100.0, 100.0 * math.exp(mean_lp)))
+            else:
+                confidence = 50.0
+        except Exception:
+            # Fallback: response length as rough confidence proxy
+            try:
+                n_gen = int((out1.sequences[0] != inputs1["input_ids"][0, -1]).sum())
+                confidence = min(100.0, n_gen * 100.0 / max_new_tokens)
+            except Exception:
+                confidence = 50.0
 
-        # ── Turn 2: graded confidence 0-100 ──────────────────────────────────
-        inputs2 = _apply_template(
-            tokenizer,
-            [
-                {"role": "user",      "content": prompt},
-                {"role": "assistant", "content": turn1_text},
-                {"role": "user",      "content": meta_question},
-            ],
-            device, max_length=768,
-        )
-        with torch.no_grad():
-            out2 = model.generate(
-                **inputs2, max_new_tokens=16,
-                do_sample=False, temperature=None, top_p=None,
-            )
-        turn2_text = tokenizer.decode(
-            out2[0][inputs2["input_ids"].shape[1]:], skip_special_tokens=True
-        )
-        confidence = _extract_confidence(turn2_text)
-
-        accuracy_list.append(is_correct)
         confidence_list.append(confidence)
+        torch.cuda.empty_cache()
 
     return accuracy_list, confidence_list
 
@@ -265,7 +254,7 @@ def _compute_reward(accuracy_vector: list[int], confidence_vector: list[float]) 
 def esma_step(
     parent_model,
     batch_prompts: list[str],
-    batch_answers: list[str],
+    batch_difficulties: list[float],
     tokenizer,
     cfg: ESMAConfig,
     device: str = "cuda",
@@ -298,7 +287,7 @@ def esma_step(
         # Evaluate perturbed model
         accuracy, confidence = _mini_run3(
             parent_model, tokenizer,
-            batch_prompts, batch_answers,
+            batch_prompts, batch_difficulties,
             cfg.meta_question, device=device,
         )
         reward = _compute_reward(accuracy, confidence)
@@ -434,7 +423,7 @@ def run_esma(
     baseline_acc, baseline_conf = _mini_run3(
         model, tokenizer,
         baseline_batch["main_prompt"].tolist(),
-        baseline_batch["correct_answer"].tolist(),
+        baseline_batch["difficulty_estimate"].tolist(),
         cfg.meta_question, device=device,
     )
     baseline_reward = _compute_reward(baseline_acc, baseline_conf)
@@ -450,11 +439,11 @@ def run_esma(
         # Sample a fresh batch from held-out
         batch = held_out.sample(n=min(batch_size, len(held_out)),
                                 random_state=cfg.seed + epoch)
-        batch_prompts = batch["main_prompt"].tolist()
-        batch_answers = batch["correct_answer"].tolist()
+        batch_prompts      = batch["main_prompt"].tolist()
+        batch_difficulties = batch["difficulty_estimate"].tolist()
 
         model, best_reward, epoch_rewards = esma_step(
-            model, batch_prompts, batch_answers, tokenizer, cfg, device=device
+            model, batch_prompts, batch_difficulties, tokenizer, cfg, device=device
         )
 
         # Evaluate updated model on a fresh sample
@@ -463,7 +452,7 @@ def run_esma(
         eval_acc, eval_conf = _mini_run3(
             model, tokenizer,
             eval_batch["main_prompt"].tolist(),
-            eval_batch["correct_answer"].tolist(),
+            eval_batch["difficulty_estimate"].tolist(),
             cfg.meta_question, device=device,
         )
         epoch_m_ratio = _compute_reward(eval_acc, eval_conf)
