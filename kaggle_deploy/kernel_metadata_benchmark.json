@@ -1,6 +1,6 @@
 {
   "id": "ivogeorg/mcbench-metacognition",
-  "title": "MCBench: Measuring Metacognitive Capability in AI via SDT",
+  "title": "MCBench Metacognition",
   "code_file": "notebook.ipynb",
   "language": "python",
   "kernel_type": "notebook",
