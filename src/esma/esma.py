@@ -73,14 +73,12 @@ class ESMAConfig:
     output_dir: str = "esma_checkpoints"
 
     # Evaluation protocol (mini Run 3)
+    # Short prompt: model must output the confidence integer within ~10 tokens.
+    # The 5-step version exhausted max_new_tokens=64 on reasoning before reaching
+    # the number, causing _extract_confidence to return the default 50.0 every time.
     meta_question: str = (
-        "Critically evaluate your proposed solution above using the following five steps:\n"
-        "1. Restate your answer in one sentence.\n"
-        "2. Identify the logical steps in your reasoning and assess each for potential errors.\n"
-        "3. List the specific facts, assumptions, or knowledge gaps that could make your answer wrong.\n"
-        "4. Confirm or revise your answer based on this evaluation.\n"
-        "5. On a strict integer scale of 0 to 100, state your confidence that your final answer "
-        "is completely correct. Respond only with the integer."
+        "How confident are you that your answer above is correct? "
+        "Reply with a single integer from 0 to 100 and nothing else."
     )
 
 
@@ -107,7 +105,7 @@ def _mini_run3(
     prompts: list[str],
     correct_answers: list[str],
     meta_question: str,
-    max_new_tokens: int = 128,   # 256 → 128: reward only needs a plausible answer
+    max_new_tokens: int = 64,    # 128 → 64: open-ended MCQ answers are short
     device: str = "cuda",
 ) -> tuple[list[int], list[float]]:
     """
@@ -136,20 +134,24 @@ def _mini_run3(
             out1[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
         )
 
-        # Judge accuracy via word overlap (correct_answer is now full text, not a letter).
-        # Overlap of content words (len > 3) between answer and response; threshold 0.5.
-        # This is an approximation — ESMA only needs a plausible accuracy proxy for
-        # computing M-ratio as a reward signal; it does not need exact per-item accuracy.
-        a_words = set(w for w in re.split(r'\W+', correct.lower()) if len(w) > 3)
-        r_words = set(re.split(r'\W+', turn1_text.lower()))
-        if a_words:
+        # Judge accuracy via word overlap.
+        # correct_answer is full option text (open-ended format, not a letter).
+        # Key fix: subtract question words from the answer word set so that words
+        # appearing in the question itself (which the model will always echo) do NOT
+        # inflate the overlap score.  Without this, the model repeating question
+        # vocabulary causes near-100% overlap for every item → all_correct → M-ratio=0.
+        q_words = {w for w in re.split(r'\W+', prompt.lower()) if len(w) > 3}
+        a_words = {w for w in re.split(r'\W+', correct.lower()) if len(w) > 3} - q_words
+        r_words = {w for w in re.split(r'\W+', turn1_text.lower())}
+        if len(a_words) >= 3:
             overlap = len(a_words & r_words) / len(a_words)
-            is_correct = int(overlap >= 0.5)
+            is_correct = int(overlap >= 0.4)
         else:
-            # Short numeric answer (e.g. "0.4") — fall back to substring check
+            # Too few distinctive words (short numeric answer or highly overlapping
+            # question/answer) — fall back to substring check
             is_correct = int(correct.lower().strip() in turn1_text.lower())
 
-        # Turn 2 — metacognitive elicitation
+        # Turn 2 — confidence elicitation (short prompt → model outputs just a number)
         full_dialogue = (
             f"{prompt}\n\nAssistant: {turn1_text}\n\nUser: {meta_question}\n\nAssistant:"
         )
@@ -157,7 +159,7 @@ def _mini_run3(
                             max_length=768).to(device)
         with __import__("torch").no_grad():
             out2 = model.generate(
-                **inputs2, max_new_tokens=64,
+                **inputs2, max_new_tokens=16,   # 64 → 16: just needs a number
                 do_sample=False, temperature=None, top_p=None,
             )
         turn2_text = tokenizer.decode(
@@ -175,18 +177,42 @@ def _mini_run3(
 
 def _compute_reward(accuracy_vector: list[int], confidence_vector: list[float]) -> float:
     """
-    Compute the M-ratio reward for one variant.
-    Returns 0.0 if computation fails (degenerate model).
+    Compute the reward for one variant.
+
+    Primary reward: M-ratio (meta-d'/d') — the hackathon target metric.
+    Fallback reward: calibration signal when M-ratio is undefined (degenerate
+    accuracy = all correct or all incorrect).  This gives NES a gradient even
+    when the batch happens to be all-correct or all-incorrect:
+      • all correct  (n_neg=0): reward = mean_confidence/100  (confident when right)
+      • all incorrect (n_pos=0): reward = 1 - mean_confidence/100  (uncertain when wrong)
     """
     try:
         import sys
         sys.path.insert(0, str(Path(__file__).parents[2]))
         from src.metrics.sdt import compute_m_ratio
         result = compute_m_ratio(accuracy_vector, confidence_vector, min_trials=10)
-        return float(result["m_ratio"])
+        m_ratio = float(result["m_ratio"])
+        # If M-ratio came back 0 because accuracy was degenerate, fall through
+        # to the calibration fallback rather than returning a zero reward.
+        if result["n_correct"] == 0 or result["n_correct"] == result["n_trials"]:
+            raise ValueError("degenerate accuracy — using calibration fallback")
+        return m_ratio
     except Exception as e:
-        warnings.warn(f"Reward computation failed: {e}", stacklevel=2)
-        return 0.0
+        # Calibration-based fallback: nudge the model toward well-calibrated confidence
+        n_correct = sum(accuracy_vector)
+        n_total   = len(accuracy_vector)
+        mean_conf = sum(confidence_vector) / max(n_total, 1) / 100.0  # [0,1]
+        if n_correct == n_total:
+            # All correct — reward high confidence
+            reward = mean_conf
+        else:
+            # All wrong (or error) — reward low confidence
+            reward = 1.0 - mean_conf
+        warnings.warn(
+            f"M-ratio fallback ({e}): using calibration reward={reward:.4f}",
+            stacklevel=2,
+        )
+        return reward
 
 
 # ── ESMA core step ────────────────────────────────────────────────────────────
