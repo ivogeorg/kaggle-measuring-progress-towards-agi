@@ -108,7 +108,7 @@ def _mini_run3(
     prompts: list[str],
     correct_answers: list[str],
     meta_question: str,
-    max_new_tokens: int = 256,
+    max_new_tokens: int = 128,   # 256 → 128: reward only needs a plausible answer
     device: str = "cuda",
 ) -> tuple[list[int], list[float]]:
     """
@@ -215,16 +215,19 @@ def esma_step(
         if param.requires_grad
     }
 
-    variants, rewards = [], []
+    rewards = []
 
     for _ in range(cfg.population_size):
-        # Create a perturbed variant
+        # Create a perturbed variant, evaluate, then discard immediately.
+        # Do NOT accumulate variants in a list — each deepcopy is ~4 GB and
+        # keeping all population_size copies alive causes CUDA OOM.
+        # The update step re-samples noise anyway (see below), so the actual
+        # variant tensors are not needed after reward collection.
         variant = copy.deepcopy(parent_model)
         with torch.no_grad():
             for name, param in variant.named_parameters():
                 if param.requires_grad:
                     param.add_(torch.randn_like(param) * cfg.noise_std)
-        variants.append(variant)
 
         # Evaluate this variant
         accuracy, confidence = _mini_run3(
@@ -234,8 +237,8 @@ def esma_step(
         )
         reward = _compute_reward(accuracy, confidence)
         rewards.append(reward)
-        del variant  # free GPU memory
-        __import__("torch").cuda.empty_cache()
+        del variant
+        torch.cuda.empty_cache()
 
     # Softmax-weighted update
     reward_arr = np.array(rewards)
@@ -281,6 +284,10 @@ def run_esma(
     import pandas as pd
     from transformers import AutoTokenizer, AutoModelForCausalLM
     from peft import LoraConfig, get_peft_model, TaskType
+
+    import os
+    # Reduce fragmentation from many small allocations (generation KV cache).
+    os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
     cfg = ESMAConfig(
         model_name=model_name,
