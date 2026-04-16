@@ -1,6 +1,6 @@
 {
   "id": "ivogeorg/mcbench-esma-gemma4",
-  "title": "ESMA: Metacognitive Alignment of Gemma 4 via Evolution Strategies",
+  "title": "MCBench ESMA Gemma4",
   "code_file": "notebook.ipynb",
   "language": "python",
   "kernel_type": "notebook",
