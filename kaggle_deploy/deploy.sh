@@ -31,20 +31,31 @@ upload_dataset() {
     cp "$REPO_ROOT/requirements.txt" "$STAGING/"
     cp "$DEPLOY_DIR/dataset_metadata.json" "$STAGING/dataset-metadata.json"
 
-    # Create or version
-    if kaggle datasets status ivogeorg/mcbench-metacognitive-benchmark &>/dev/null; then
+    # Create or version  (--dir-mode zip required to upload src/ and data/ folders)
+    if kaggle datasets status ivogeorg/mcbench-metacognitive-benchmark 2>/dev/null | grep -q "ready\|pending\|private"; then
         echo "Dataset exists — creating new version"
-        kaggle datasets version -p "$STAGING" -m "Update $(date +%Y-%m-%d)"
+        kaggle datasets version -p "$STAGING" -m "Update $(date +%Y-%m-%d)" --dir-mode zip
     else
         echo "Creating new private dataset"
-        kaggle datasets create -p "$STAGING"
+        kaggle datasets create -p "$STAGING" --dir-mode zip
     fi
     echo "Dataset upload complete."
 }
 
 # ── 2. Push benchmark notebook ───────────────────────────────────────────────
+# NOTE: The benchmark task notebook (mcbench-task-01) was created through the
+# Kaggle Benchmark UI and lives in the benchmark system.  It cannot be pushed
+# to via 'kaggle kernels push' — that API only manages standalone kernels.
+#
+# To update the benchmark task notebook, copy the content of mcbench.ipynb
+# into the Kaggle editor at:
+#   https://www.kaggle.com/code/ivogeorg/mcbench-task-01/edit
+#
+# This function is kept for reference and for any future standalone variant.
 push_benchmark() {
     echo "=== Pushing MCBench benchmark notebook ==="
+    BENCHMARK_SLUG=$(python3 -c \
+        "import json; print(json.load(open('$DEPLOY_DIR/kernel_metadata_benchmark.json'))['id'])")
     STAGING=$(mktemp -d)
     trap "rm -rf $STAGING" EXIT
 
@@ -54,9 +65,9 @@ push_benchmark() {
     kaggle kernels push -p "$STAGING"
     echo "Benchmark notebook pushed. Monitoring..."
     sleep 5
-    kaggle kernels status ivogeorg/mcbench-metacognition
+    kaggle kernels status "$BENCHMARK_SLUG"
     echo ""
-    echo "Watch progress: kaggle kernels status ivogeorg/mcbench-metacognition"
+    echo "Watch progress: kaggle kernels status $BENCHMARK_SLUG"
 }
 
 # ── 3. Push ESMA notebook (GPU) ──────────────────────────────────────────────
