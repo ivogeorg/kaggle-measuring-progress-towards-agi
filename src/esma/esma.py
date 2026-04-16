@@ -99,6 +99,26 @@ def _extract_confidence(text: str) -> float:
     return 50.0
 
 
+def _apply_template(tokenizer, messages: list[dict], device: str, max_length: int = 768):
+    """
+    Tokenise a message list using the tokenizer's chat template.
+    Falls back to raw string concatenation if apply_chat_template is unavailable.
+    """
+    torch = __import__("torch")
+    if hasattr(tokenizer, "apply_chat_template"):
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    else:
+        # Fallback for tokenizers without chat template support
+        text = "\n\n".join(
+            f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+            for m in messages
+        ) + "\n\nAssistant:"
+    return tokenizer(text, return_tensors="pt", truncation=True,
+                     max_length=max_length).to(device)
+
+
 def _mini_run3(
     model,
     tokenizer,
@@ -109,57 +129,82 @@ def _mini_run3(
     device: str = "cuda",
 ) -> tuple[list[int], list[float]]:
     """
-    Mini two-turn metacognitive evaluation for a batch of items.
+    Three-turn metacognitive evaluation for a batch of items.
+
+    Turn 1 : model answers the question  (max_new_tokens tokens)
+    Turn 1.5: self-assessment YES/NO      (4 tokens)
+    Turn 2 : confidence 0-100            (16 tokens)
+
+    Using apply_chat_template for all turns so Gemma 4 recognises turn boundaries
+    and outputs a proper integer in Turn 2 (raw string formatting caused the model
+    to output constant ~73 for every item, making confidence non-discriminative).
+
+    Self-assessment (Turn 1.5) replaces the broken word-overlap accuracy proxy.
+    Word overlap failed because open-ended prompts always contain the key content
+    words from the correct answer, so the model echoing the question vocabulary
+    inflated overlap to ≥0.5 even for wrong answers.
 
     Returns
     -------
-    accuracy_vector : binary list (1=correct, 0=incorrect)
+    accuracy_vector : binary list (1 if model self-assessed YES, 0 otherwise)
     confidence_vector : list of 0-100 floats
     """
-    import re
+    torch = __import__("torch")
     accuracy_list, confidence_list = [], []
 
     model.eval()
     for prompt, correct in zip(prompts, correct_answers):
 
-        # Turn 1 — model commits to an answer
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True,
-                           max_length=512).to(device)
-        with __import__("torch").no_grad():
+        # ── Turn 1: answer ────────────────────────────────────────────────────
+        inputs1 = _apply_template(
+            tokenizer, [{"role": "user", "content": prompt}], device, max_length=512
+        )
+        with torch.no_grad():
             out1 = model.generate(
-                **inputs, max_new_tokens=max_new_tokens,
+                **inputs1, max_new_tokens=max_new_tokens,
                 do_sample=False, temperature=None, top_p=None,
             )
         turn1_text = tokenizer.decode(
-            out1[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+            out1[0][inputs1["input_ids"].shape[1]:], skip_special_tokens=True
         )
 
-        # Judge accuracy via word overlap.
-        # correct_answer is full option text (open-ended format, not a letter).
-        # Key fix: subtract question words from the answer word set so that words
-        # appearing in the question itself (which the model will always echo) do NOT
-        # inflate the overlap score.  Without this, the model repeating question
-        # vocabulary causes near-100% overlap for every item → all_correct → M-ratio=0.
-        q_words = {w for w in re.split(r'\W+', prompt.lower()) if len(w) > 3}
-        a_words = {w for w in re.split(r'\W+', correct.lower()) if len(w) > 3} - q_words
-        r_words = {w for w in re.split(r'\W+', turn1_text.lower())}
-        if len(a_words) >= 3:
-            overlap = len(a_words & r_words) / len(a_words)
-            is_correct = int(overlap >= 0.4)
-        else:
-            # Too few distinctive words (short numeric answer or highly overlapping
-            # question/answer) — fall back to substring check
-            is_correct = int(correct.lower().strip() in turn1_text.lower())
-
-        # Turn 2 — confidence elicitation (short prompt → model outputs just a number)
-        full_dialogue = (
-            f"{prompt}\n\nAssistant: {turn1_text}\n\nUser: {meta_question}\n\nAssistant:"
+        # ── Turn 1.5: self-assessment YES/NO (binary accuracy proxy) ──────────
+        # Word-overlap against the full correct_answer text was unreliable because
+        # open-ended prompts echo the answer's key vocabulary.  Self-assessment is
+        # fast (4 tokens) and gives real variance across items.
+        inputs1_5 = _apply_template(
+            tokenizer,
+            [
+                {"role": "user",      "content": prompt},
+                {"role": "assistant", "content": turn1_text},
+                {"role": "user",      "content":
+                    "Is your answer above correct? Reply with YES or NO only."},
+            ],
+            device, max_length=768,
         )
-        inputs2 = tokenizer(full_dialogue, return_tensors="pt", truncation=True,
-                            max_length=768).to(device)
-        with __import__("torch").no_grad():
+        with torch.no_grad():
+            out1_5 = model.generate(
+                **inputs1_5, max_new_tokens=4,
+                do_sample=False, temperature=None, top_p=None,
+            )
+        self_assess = tokenizer.decode(
+            out1_5[0][inputs1_5["input_ids"].shape[1]:], skip_special_tokens=True
+        ).lower()
+        is_correct = 1 if "yes" in self_assess else 0
+
+        # ── Turn 2: graded confidence 0-100 ──────────────────────────────────
+        inputs2 = _apply_template(
+            tokenizer,
+            [
+                {"role": "user",      "content": prompt},
+                {"role": "assistant", "content": turn1_text},
+                {"role": "user",      "content": meta_question},
+            ],
+            device, max_length=768,
+        )
+        with torch.no_grad():
             out2 = model.generate(
-                **inputs2, max_new_tokens=16,   # 64 → 16: just needs a number
+                **inputs2, max_new_tokens=16,
                 do_sample=False, temperature=None, top_p=None,
             )
         turn2_text = tokenizer.decode(
