@@ -1,0 +1,8 @@
+{
+  "title": "MCBench: Metacognitive Capability Benchmark Dataset",
+  "id": "ivogeorg/mcbench-metacognitive-benchmark",
+  "licenses": [{"name": "CC-BY-NC-4.0"}],
+  "description": "Evaluation dataset for MCBench: 600 curated items from MMLU-Pro and GPQA Diamond for measuring metacognitive capability in LLMs via Signal Detection Theory (M-ratio). The full 900-item held-out set is excluded to prevent data contamination. Includes all benchmark source code and metrics.",
+  "keywords": ["nlp", "llm", "metacognition", "signal-detection-theory", "benchmark", "calibration"],
+  "isPrivate": true
+}

@@ -1,0 +1,15 @@
+{
+  "id": "ivogeorg/mcbench-esma-gemma4",
+  "title": "ESMA: Metacognitive Alignment of Gemma 4 via Evolution Strategies",
+  "code_file": "notebook.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["ivogeorg/mcbench-metacognitive-benchmark"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": ["google/gemma/transformers/gemma-4-2b-it/1"]
+}
