@@ -97,4 +97,4 @@ Projected results show gpt-3.5-turbo gaining ΔMCI = +0.27 (from 0.22 to 0.49) �
 
 MCBench is designed for longevity. The held-out 900-item set is reserved for adversarial ESMA evaluation — testing whether M-ratio-optimized models generalize or overfit to the benchmark distribution. Key open questions: whether ESMA-trained models show genuine metacognitive improvement or surface-level calibration tuning; whether the MetaMind scaffold generalizes to non-MCQ domains; and whether SRS performance is a reliable proxy for the broader self-model quality that underlies trustworthy uncertainty estimation.
 
-The benchmark, dataset, and full three-run evaluation pipeline are available as a Kaggle benchmark task for ongoing community evaluation across the full model leaderboard.
+The benchmark is configured at N=50 items for responsive leaderboard runs during judging; the full 475-item MMLU-Pro evaluation set is available by setting `N_EVAL_ITEMS=None` in cell 1 of the task notebook. The benchmark, dataset, and full three-run evaluation pipeline are available as a Kaggle benchmark task for ongoing community evaluation across the full model leaderboard.
