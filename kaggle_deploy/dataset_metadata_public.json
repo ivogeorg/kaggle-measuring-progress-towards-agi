@@ -1,0 +1,8 @@
+{
+  "title": "MCBench: Metacognitive Benchmark (MMLU-Pro, Public)",
+  "id": "ivogeorg/mcbench-metacognitive-benchmark-public",
+  "licenses": [{"name": "CC-BY-4.0"}],
+  "description": "Public evaluation dataset for MCBench: 475 items from MMLU-Pro only (GPQA Diamond excluded per license). Used for the Kaggle Benchmark leaderboard task. Measures metacognitive capability in LLMs via Signal Detection Theory (M-ratio, SRS, ECE → MCI).",
+  "keywords": ["nlp", "llm", "metacognition", "signal-detection-theory", "benchmark", "calibration", "mmlu"],
+  "isPrivate": false
+}

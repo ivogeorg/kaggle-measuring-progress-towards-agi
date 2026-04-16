@@ -1,0 +1,9 @@
+{
+  "title": "MCBench: Metacognitive Benchmark (MMLU-Pro, Pub)",
+  "id": "ivogeorg/mcbench-metacognitive-benchmark-public",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ]
+}
