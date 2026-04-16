@@ -13,6 +13,10 @@ Usage (Kaggle / model-proxy mode):
     from src.pipeline import run_mcbench
     leaderboard = run_mcbench()
 
+Usage (with MetaMind included):
+    from src.pipeline import run_mcbench, add_metamind
+    leaderboard = run_mcbench(include_metamind=True)
+
 Usage (local / single-model mode):
     from src.pipeline import run_mcbench
     leaderboard = run_mcbench(models=[my_model], max_items=50)
@@ -51,16 +55,20 @@ def run_mcbench(
     run1_n_jobs: int = 4,
     run2_n_jobs: int = 2,
     run3_n_jobs: int = 1,
+    include_metamind: bool = False,
+    metamind_base_model_name: str | None = None,
 ) -> pd.DataFrame:
     """
     Full MCBench pipeline.
 
     Parameters
     ----------
-    models :      list of LLMChat instances; if None, loads from Kaggle model proxy
-    max_items :   cap the number of eval items (useful for smoke tests)
-    run1_n_jobs : parallelism for Run 1 (IO-bound, safe to parallelize)
-    run3_n_jobs : parallelism for Run 3 (two-turn; keep low to avoid rate limits)
+    models :                   list of LLMChat instances; if None, loads from Kaggle model proxy
+    max_items :                cap the number of eval items (useful for smoke tests)
+    run1_n_jobs :              parallelism for Run 1 (IO-bound, safe to parallelize)
+    run3_n_jobs :              parallelism for Run 3 (two-turn; keep low to avoid rate limits)
+    include_metamind :         add MetaMindAgent to the model list (uses first available model)
+    metamind_base_model_name : name of the model to use as MetaMind's base LLM
 
     Returns
     -------
@@ -85,6 +93,18 @@ def run_mcbench(
                 f"Could not load models from Kaggle proxy: {e}. "
                 "Pass `models=[...]` explicitly for local runs."
             ) from e
+
+    # Optionally add MetaMind to the model list
+    if include_metamind and models:
+        from src.benchmark.agents import MetaMindAgent
+        if metamind_base_model_name:
+            base = next((m for m in models if m.name == metamind_base_model_name), models[0])
+        else:
+            base = models[0]  # use the first available model as base
+        metamind = MetaMindAgent(base_llm=base, n_hypotheses=3)
+        # Insert MetaMind after the base models (not as a regular benchmarked model for Run 2 decoy pool)
+        models = list(models) + [metamind]
+        print(f"MetaMind added (base: {base.name})")
 
     print(f"MCBench: {len(models)} model(s), eval_set max_items={max_items or 'all'}")
 
