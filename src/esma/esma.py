@@ -286,7 +286,22 @@ def run_esma(
         noise_std=noise_std,
     )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        # PyTorch >=2.1 requires sm_70+; P100 is sm_60 and will fail silently.
+        # Detect capability and fall back to CPU rather than dying mid-run.
+        major, minor = torch.cuda.get_device_capability(0)
+        sm = major * 10 + minor
+        if sm < 70:
+            gpu_name = torch.cuda.get_device_name(0)
+            print(
+                f"WARNING: {gpu_name} (sm_{sm}) is below PyTorch sm_70 requirement. "
+                "Falling back to CPU — ESMA will run correctly but slowly."
+            )
+            device = "cpu"
+        else:
+            device = "cuda"
+    else:
+        device = "cpu"
     print(f"ESMA on {model_name} | device={device} | epochs={n_epochs}")
 
     # ── Load tokenizer and base model ────────────────────────────────────────
@@ -296,7 +311,7 @@ def run_esma(
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto",
+        device_map="auto" if device == "cuda" else None,
         low_cpu_mem_usage=True,
     )
 
