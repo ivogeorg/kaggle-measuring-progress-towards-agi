@@ -23,7 +23,10 @@ upload_dataset() {
     STAGING=$(mktemp -d)
     trap "rm -rf $STAGING" EXIT
 
-    cp "$REPO_ROOT/data/eval_set.parquet" "$STAGING/"
+    # data/ subdirectory — code resolves DATA_DIR as parents[N]/"data"
+    mkdir -p "$STAGING/data"
+    cp "$REPO_ROOT/data/eval_set.parquet"    "$STAGING/data/"
+    cp "$REPO_ROOT/data/held_out_set.parquet" "$STAGING/data/"
     cp -r "$REPO_ROOT/src" "$STAGING/"
     cp "$REPO_ROOT/requirements.txt" "$STAGING/"
     cp "$DEPLOY_DIR/dataset_metadata.json" "$STAGING/dataset-metadata.json"
