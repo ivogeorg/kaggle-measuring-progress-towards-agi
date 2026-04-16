@@ -64,7 +64,11 @@ class ESMAConfig:
     lora_rank: int = 16
     lora_alpha: int = 32
     lora_target_modules: list[str] = field(
-        default_factory=lambda: ["q_proj", "v_proj"]
+        # Gemma 4 wraps projections in Gemma4ClippableLinear; PEFT cannot
+        # inject LoRA into the wrapper directly. Target the inner .linear
+        # attribute instead — PEFT suffix-matches "q_proj.linear" against
+        # module keys like "...self_attn.q_proj.linear" (nn.Linear).
+        default_factory=lambda: ["q_proj.linear", "v_proj.linear"]
     )
     seed: int = 2026
     output_dir: str = "esma_checkpoints"
@@ -310,7 +314,7 @@ def run_esma(
 
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        dtype=torch.float16 if device == "cuda" else torch.float32,
         device_map="auto" if device == "cuda" else None,
         low_cpu_mem_usage=True,
     )
