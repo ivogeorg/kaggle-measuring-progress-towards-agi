@@ -69,7 +69,7 @@ push_esma() {
     cp "$REPO_ROOT/gemma4_esma.ipynb" "$STAGING/notebook.ipynb"
     cp "$DEPLOY_DIR/kernel_metadata_esma.json" "$STAGING/kernel-metadata.json"
 
-    kaggle kernels push -p "$STAGING" --accelerator gpu
+    kaggle kernels push -p "$STAGING"
     echo "ESMA notebook pushed. Monitoring..."
     sleep 5
     kaggle kernels status ivogeorg/mcbench-esma-gemma4
