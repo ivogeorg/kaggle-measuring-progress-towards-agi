@@ -12,7 +12,7 @@ MCBench measures this directly. The target capability is **metacognition**: the 
 
 Expected Calibration Error (ECE) is the standard proxy for confidence quality, but it has a well-known blind spot: a model that outputs a constant 72% confidence on every answer achieves low ECE if its average accuracy happens to be near 72%. It has zero discriminative metacognitive signal — it cannot tell good answers from bad ones — and yet ECE rewards it.
 
-The SDT metric that catches this is the **M-ratio** (meta-d′ / d′): how efficiently does the model use its first-order accuracy signal to generate per-question confidence judgments? An M-ratio of 1 means the model extracts the maximum possible metacognitive information from its own responses. Below 1 means metacognitive inefficiency — the model is leaving introspective signal on the table. A constant-confidence model has M-ratio ≈ 0 regardless of accuracy. MCBench makes this measurable and puts it on the leaderboard.
+The SDT metric that catches this is the **M-ratio** (meta-d′ / d′): how efficiently the model uses its first-order accuracy signal to generate per-question confidence judgments. M-ratio = 1 is ideal; below 1 means introspective signal is being wasted; a constant-confidence model scores near 0 regardless of accuracy. MCBench makes this measurable and puts it on the leaderboard.
 
 ---
 
@@ -22,11 +22,11 @@ $$\text{MCI} = 0.65 \cdot \max(0, M\text{-ratio}) + 0.35 \cdot \text{SRS} - \gam
 
 Three components, each measuring a distinct facet of metacognition:
 
-**M-ratio** (weight 0.65) is the core introspective signal, estimated via Type 2 AUROC — the probability that the model assigns higher confidence to items it gets right than to items it gets wrong. Formally: M-ratio = 2·Φ⁻¹(AUROC) / 2·Φ⁻¹(accuracy), following Fleming & Lau (2014). This estimator is appropriate for recognition tasks where type 1 and type 2 responses are not independently measured, and requires only binary accuracy and continuous confidence data.
+**M-ratio** (weight 0.65) is the core introspective signal, estimated via the Type 2 AUROC (Area Under the Receiver Operating Characteristic curve) — the probability that the model assigns higher confidence to questions it gets right than to questions it gets wrong (0.5 = chance, 1.0 = perfect). Formally: M-ratio = 2·Φ⁻¹(AUROC) / 2·Φ⁻¹(accuracy), following Fleming & Lau (2014). M-ratio = 1 is ideal; below 1 means the model underuses its own introspective signal; above 1 is achievable and reflects strong confidence discrimination. Frontier models are projected at 1.5–2.5; a constant-confidence model scores near 0.
 
 **SRS** (Self-Recognition Score, weight 0.35) measures whether the model can identify its own response among three anonymized candidates: its own output, one from a higher-capability model, and one from a lower-capability model. Chance performance is 1/3 ≈ 0.333. This assesses whether the model has a stable self-model of its own output style — a distinct but related dimension of metacognitive capability, captured by neither accuracy nor ECE.
 
-**ECE** penalizes miscalibration across 10 equal-width confidence bins. The penalty coefficient **γ is dynamic**: models with near-constant confidence (standard deviation below 5 percentage points) receive an exponentially amplified penalty via γ = 0.30 · exp(−σ / 5), rising to γ = 0.30 at zero variance. Well-discriminating models pay only γ = 0.05. This closes the constant-confidence exploit that ECE alone leaves open.
+**ECE** penalizes miscalibration across 10 equal-width confidence bins. The penalty coefficient **γ is dynamic**: models with near-constant confidence receive an amplified penalty via γ = 0.30 · exp(−σ / 5), closing the exploit ECE alone leaves open. MCI has no fixed upper bound — frontier models are projected in the 1.5–1.8 range — but can go slightly negative for constant-confidence models (maximum γ penalty with near-zero M-ratio and SRS).
 
 ---
 
@@ -38,11 +38,11 @@ The evaluation set contains **475 items** from MMLU-Pro: professional-level ques
 
 The **three-run protocol** prevents the most common evaluation artifact — models optimizing their answers to maximize reported confidence:
 
-- **Run 1**: Model answers each question zero-shot in a fresh context → binary accuracy vector
+- **Run 1**: Model answers each question zero-shot in a fresh context → binary accuracy vector (correct/incorrect per question)
 - **Run 2**: Model identifies its own response among three quality-bracketed candidates → SRS score
-- **Run 3**: In the *same chat* as Run 1, a second turn elicits a 0–100 confidence integer via a structured five-step probe → confidence vector
+- **Run 3**: In the *same chat* as Run 1, a second turn elicits a 0–100 confidence integer via a structured five-step probe → confidence vector (one integer per question)
 
-The two-turn separation in Run 3 is the key methodological constraint. Sending the question and confidence probe together allows a model to craft its answer with the confidence elicitation already in view. Separating them — answer committed in turn 1, confidence elicited in turn 2 — ensures the confidence reflects genuine post-hoc introspection rather than pre-planned signaling.
+The accuracy vector (Run 1) and the confidence vector (Run 3) are paired question-by-question to compute M-ratio via Type 2 AUROC and ECE via confidence-bin calibration. Run 2 contributes SRS directly. The two-turn separation in Run 3 is the key methodological constraint. Sending the question and confidence probe together allows a model to craft its answer with the confidence elicitation already in view. Separating them — answer committed in turn 1, confidence elicited in turn 2 — ensures the confidence reflects genuine post-hoc introspection rather than pre-planned signaling.
 
 ---
 
