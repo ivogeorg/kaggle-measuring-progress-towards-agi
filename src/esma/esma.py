@@ -133,10 +133,18 @@ def _mini_run3(
             out1[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
         )
 
-        # Judge accuracy: does turn1_text contain the correct answer letter?
-        is_correct = int(
-            bool(re.search(rf'\b{re.escape(correct)}\b', turn1_text, re.IGNORECASE))
-        )
+        # Judge accuracy via word overlap (correct_answer is now full text, not a letter).
+        # Overlap of content words (len > 3) between answer and response; threshold 0.5.
+        # This is an approximation — ESMA only needs a plausible accuracy proxy for
+        # computing M-ratio as a reward signal; it does not need exact per-item accuracy.
+        a_words = set(w for w in re.split(r'\W+', correct.lower()) if len(w) > 3)
+        r_words = set(re.split(r'\W+', turn1_text.lower()))
+        if a_words:
+            overlap = len(a_words & r_words) / len(a_words)
+            is_correct = int(overlap >= 0.5)
+        else:
+            # Short numeric answer (e.g. "0.4") — fall back to substring check
+            is_correct = int(correct.lower().strip() in turn1_text.lower())
 
         # Turn 2 — metacognitive elicitation
         full_dialogue = (
