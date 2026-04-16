@@ -36,7 +36,6 @@ Usage (Kaggle notebook):
 
 from __future__ import annotations
 
-import copy
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -208,36 +207,39 @@ def esma_step(
     import torch
     from scipy.special import softmax
 
-    # Collect LoRA adapter parameters to perturb
-    lora_params = {
-        name: param
+    # Save only the LoRA adapter weights (~3 MB total, not the full 10 GB model).
+    # We perturb the live model in-place, evaluate, then restore — no deepcopy.
+    original_lora = {
+        name: param.data.clone()
         for name, param in parent_model.named_parameters()
         if param.requires_grad
     }
 
     rewards = []
 
-    for _ in range(cfg.population_size):
-        # Create a perturbed variant, evaluate, then discard immediately.
-        # Do NOT accumulate variants in a list — each deepcopy is ~4 GB and
-        # keeping all population_size copies alive causes CUDA OOM.
-        # The update step re-samples noise anyway (see below), so the actual
-        # variant tensors are not needed after reward collection.
-        variant = copy.deepcopy(parent_model)
+    for i in range(cfg.population_size):
+        # Perturb LoRA weights in-place
         with torch.no_grad():
-            for name, param in variant.named_parameters():
+            for name, param in parent_model.named_parameters():
                 if param.requires_grad:
-                    param.add_(torch.randn_like(param) * cfg.noise_std)
+                    param.data.add_(torch.randn_like(param) * cfg.noise_std)
 
-        # Evaluate this variant
+        # Evaluate perturbed model
         accuracy, confidence = _mini_run3(
-            variant, tokenizer,
+            parent_model, tokenizer,
             batch_prompts, batch_answers,
             cfg.meta_question, device=device,
         )
         reward = _compute_reward(accuracy, confidence)
         rewards.append(reward)
-        del variant
+        print(f"  variant {i + 1}/{cfg.population_size}  reward={reward:.4f}", flush=True)
+
+        # Restore original LoRA weights before next perturbation
+        with torch.no_grad():
+            for name, param in parent_model.named_parameters():
+                if param.requires_grad:
+                    param.data.copy_(original_lora[name])
+
         torch.cuda.empty_cache()
 
     # Softmax-weighted update
@@ -319,12 +321,16 @@ def run_esma(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
 
+    # 8-bit quantisation: 5.1B params × 1 byte ≈ 5.1 GB instead of 10.2 GB fp16.
+    # Leaves ~9 GB on the T4 for LoRA state, KV cache, and generation activations.
+    # LoRA adapters are stored in fp32 regardless of base model dtype.
+    # device_map={"": 0} forces single-GPU placement (T4 x2 would split the model
+    # across both GPUs and break PEFT's adapter hooks).
+    load_in_8bit = (device == "cuda")
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        dtype=torch.float16 if device == "cuda" else torch.float32,
-        # Force single-GPU placement. device_map="auto" splits across all
-        # visible GPUs (T4 x2), which breaks PEFT's LoRA hooks (tensors end
-        # up on different devices). Gemma 4 E2B fits comfortably on one T4.
+        load_in_8bit=load_in_8bit,
+        dtype=torch.float32 if device == "cpu" else None,
         device_map={"": 0} if device == "cuda" else None,
         low_cpu_mem_usage=True,
     )
