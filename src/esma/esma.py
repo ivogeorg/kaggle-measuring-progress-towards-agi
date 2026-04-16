@@ -178,28 +178,28 @@ def _mini_run3(
                 return_dict_in_generate=True,
             )
 
-        # Mean log-probability of generated tokens → confidence proxy
+        # Top-1 probability of the FIRST generated token → confidence proxy.
+        #
+        # Why not mean log-prob of the full response?  AUROC is rank-invariant:
+        # if a LoRA perturbation shifts all items' mean log-probs by the same
+        # amount, their ordering (and thus M-ratio) does not change regardless
+        # of noise magnitude.  The first-token top-1 probability avoids this:
+        #   • It is a single softmax value, highly sensitive to small logit changes
+        #   • It varies strongly across items (different questions → very different
+        #     first-token distributions)
+        #   • Different LoRA perturbations push different items' first-token
+        #     probabilities in different directions, changing the ranking and
+        #     therefore AUROC / M-ratio across variants.
         try:
             scores = out1.scores          # tuple of (1, vocab_size) tensors
-            gen_ids = out1.sequences[0, inputs1["input_ids"].shape[1]:]
-            n = min(len(scores), len(gen_ids))
-            if n > 0:
-                log_probs = [
-                    F.log_softmax(scores[i][0], dim=-1)[gen_ids[i]].item()
-                    for i in range(n)
-                ]
-                mean_lp = sum(log_probs) / n
-                # 100·exp(0)≈100 (certain), 100·exp(-2)≈14, 100·exp(-4)≈2
-                confidence = max(0.0, min(100.0, 100.0 * math.exp(mean_lp)))
+            if scores and len(scores) > 0:
+                probs = F.softmax(scores[0][0], dim=-1)   # first-token distribution
+                top1_prob = float(probs.max().item())      # in (0, 1]
+                confidence = top1_prob * 100.0             # scale to [0, 100]
             else:
                 confidence = 50.0
         except Exception:
-            # Fallback: response length as rough confidence proxy
-            try:
-                n_gen = int((out1.sequences[0] != inputs1["input_ids"][0, -1]).sum())
-                confidence = min(100.0, n_gen * 100.0 / max_new_tokens)
-            except Exception:
-                confidence = 50.0
+            confidence = 50.0
 
         confidence_list.append(confidence)
         torch.cuda.empty_cache()
