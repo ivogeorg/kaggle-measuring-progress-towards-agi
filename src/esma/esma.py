@@ -27,7 +27,7 @@ Dependencies (Kaggle environment):
 Usage (Kaggle notebook):
     from src.esma.esma import run_esma
     results = run_esma(
-        model_name='google/gemma-4-2b-it',
+        model_name='google/gemma-4-e2b-it',
         n_epochs=8,
         population_size=8,
         batch_size=30,
@@ -56,7 +56,7 @@ HELD_OUT_PATH = DATA_DIR / "held_out_set.parquet"
 @dataclass
 class ESMAConfig:
     """Hyperparameters for one ESMA run."""
-    model_name: str = "google/gemma-4-2b-it"  # Gemma 4 E2B (2B parameter instruction-tuned)
+    model_name: str = "google/gemma-4-e2b-it"  # Gemma 4 E2B (2B parameter instruction-tuned)
     n_epochs: int = 8
     population_size: int = 8           # number of variants per epoch
     batch_size: int = 30               # items from held-out set per eval
@@ -253,7 +253,7 @@ def esma_step(
 # ── Main training loop ────────────────────────────────────────────────────────
 
 def run_esma(
-    model_name: str = "google/gemma-4-2b-it",
+    model_name: str = "google/gemma-4-e2b-it",
     n_epochs: int = 8,
     population_size: int = 8,
     batch_size: int = 30,

@@ -322,7 +322,7 @@ def plot3_full_picture(
     if esma_results is not None:
         traj = esma_results["m_ratio_trajectory"]
         d_traj = esma_results.get("d_prime_trajectory")
-        esma_model_name = esma_results.get("model_name", "gemma-4-2b-it")
+        esma_model_name = esma_results.get("model_name", "gemma-4-e2b-it")
 
         # Match ESMA start to the solo leaderboard entry for that model
         esma_solo_row = solo[solo["model"].str.contains(
