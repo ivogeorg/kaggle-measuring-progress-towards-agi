@@ -284,7 +284,7 @@ def run_esma(
     """
     import torch
     import pandas as pd
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, TaskType
 
     import os
@@ -323,13 +323,13 @@ def run_esma(
 
     # 8-bit quantisation: 5.1B params × 1 byte ≈ 5.1 GB instead of 10.2 GB fp16.
     # Leaves ~9 GB on the T4 for LoRA state, KV cache, and generation activations.
-    # LoRA adapters are stored in fp32 regardless of base model dtype.
+    # LoRA adapters are stored in fp32 regardless of base model quantisation.
     # device_map={"": 0} forces single-GPU placement (T4 x2 would split the model
     # across both GPUs and break PEFT's adapter hooks).
-    load_in_8bit = (device == "cuda")
+    bnb_config = BitsAndBytesConfig(load_in_8bit=True) if device == "cuda" else None
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        load_in_8bit=load_in_8bit,
+        quantization_config=bnb_config,
         dtype=torch.float32 if device == "cpu" else None,
         device_map={"": 0} if device == "cuda" else None,
         low_cpu_mem_usage=True,
