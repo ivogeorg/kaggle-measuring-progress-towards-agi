@@ -62,7 +62,7 @@ The following table shows expected results across representative model tiers, co
 
 We would expect frontier models to show higher M-ratios alongside higher SRS, reflecting both better introspective sensitivity and a more stable self-model. The more interesting prediction concerns gpt-3.5-turbo: despite reasonable accuracy, its projected M-ratio near zero would suggest that accuracy and metacognitive capability can dissociate substantially — a finding invisible to standard benchmarks. The constant-confidence model at the bottom should score near zero regardless of accuracy, demonstrating that the dynamic γ mechanism does its job.
 
-One confirmed result from early runs: Gemini Flash produced MCI = 0.32 on 10 items (below the 50-trial reliability threshold — noted in output). A full 50-item run on the public dataset is currently in progress.
+One confirmed result from early runs: Gemini 3 Flash produced MCI = 0.32 on 10 evaluation questions (below the 50-trial reliability threshold — noted in output). A full 50-question run on the public dataset is currently in progress.
 
 ---
 
@@ -88,4 +88,4 @@ The hypothesis is that models with weaker intrinsic metacognitive signal benefit
 
 The held-out GPQA set and ESMA pipeline point to a deeper question: does directly optimizing M-ratio during fine-tuning produce models that are genuinely more self-aware, or ones that are better at imitating calibrated responses on the training distribution? Answering this rigorously requires held-out evaluation sets, adversarial probe designs, and comparison against models trained on explicit metacognitive data — all tractable next steps from the infrastructure built here.
 
-The benchmark is configured at N=50 items for responsive leaderboard runs during judging; the full 475-item evaluation is available by setting `N_EVAL_ITEMS=None` in cell 1 of the task notebook.
+**Note to judges:** The benchmark is configured at N=50 evaluation questions per model run for responsive leaderboard turnaround during the judging period. The full evaluation set contains 475 questions (MMLU-Pro only); the original 600-question set included 125 GPQA Diamond items which were removed from the public dataset to avoid data leakage into models that may have been trained on GPQA. The full 475-question run is available by setting `N_EVAL_ITEMS=None` in cell 1 of the task notebook.
