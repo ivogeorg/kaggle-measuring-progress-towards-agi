@@ -1,6 +1,6 @@
 {
-  "id": "ivogeorg/mcbench-metacognition",
-  "title": "MCBench Metacognition",
+  "id": "ivogeorg/mcbench-task-01",
+  "title": "MCBench Task 01",
   "code_file": "notebook.ipynb",
   "language": "python",
   "kernel_type": "notebook",
