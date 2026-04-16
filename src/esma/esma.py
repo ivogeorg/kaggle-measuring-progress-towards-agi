@@ -315,7 +315,10 @@ def run_esma(
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
         dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None,
+        # Force single-GPU placement. device_map="auto" splits across all
+        # visible GPUs (T4 x2), which breaks PEFT's LoRA hooks (tensors end
+        # up on different devices). Gemma 4 E2B fits comfortably on one T4.
+        device_map={"": 0} if device == "cuda" else None,
         low_cpu_mem_usage=True,
     )
 
