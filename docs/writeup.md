@@ -73,8 +73,6 @@ The pattern is revealing. Frontier models achieve both high M-ratio (genuine int
 
 Projected results suggest the improvement is heterogeneous across model tiers:
 
-![ESMA M-ratio Trajectory](../mcbench_esma_progression.png)
-
 Lower-capability models (gemini-flash: 0.62 → 1.05) show the largest absolute gains — they have more room to improve metacognitive efficiency without changing their first-order accuracy. Higher-capability models (gemini-1-5-pro: 1.10 → 1.28) show smaller but still meaningful gains, constrained by already-good introspective sensitivity. The NES trajectory is noisy — M-ratio estimation variance is high at N=100 items — but the trend is consistent across the full 20-generation run.
 
 In practice, the first ESMA run on Gemma 4 E2B demonstrated a baseline M-ratio of 1.07, confirming that unperturbed Gemma 4 has meaningful metacognitive calibration. Random LoRA perturbations degraded this (as expected), establishing the baseline as a local optimum that NES must improve upon with directional gradient estimation.
@@ -86,8 +84,6 @@ In practice, the first ESMA run on Gemma 4 E2B demonstrated a baseline M-ratio o
 **MetaMind** is an alternative improvement strategy that requires no fine-tuning. Rather than changing model weights, it adds a three-agent reasoning scaffold: a Theory-of-Mind agent generates epistemic perspectives on the question, a domain synthesis agent produces a consensus answer with an agreement score, and the primary model responds with access to this prior — then generates confidence with awareness of the panel's uncertainty.
 
 The hypothesis is that models with weaker intrinsic metacognitive signal benefit most from explicit epistemic scaffolding, while stronger models show diminishing returns:
-
-![MetaMind Improvement](../mcbench_metamind_improvement.png)
 
 Projected results show gpt-3.5-turbo gaining ΔMCI = +0.27 (from 0.22 to 0.49) — the external structure compensates for weak internal self-monitoring. Frontier models (gpt-4o, claude-3-5-sonnet) gain only ΔMCI = +0.06–0.07, consistent with their intrinsic metacognitive capability leaving little room for scaffolding to add. This differential improvement pattern is itself a measurement: the degree to which MetaMind helps a model is a proxy for the model's metacognitive deficit.
 
