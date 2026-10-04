@@ -1,0 +1,1 @@
+Measures LLM metacognition via Signal Detection Theory: M-ratio, SRS & ECE → MCI
